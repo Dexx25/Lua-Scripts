@@ -1,0 +1,111 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+
+local DEFAULT_COLOR = Color3.fromRGB(255, 255, 255)
+local LOWEST_HEALTH_COLOR = Color3.fromRGB(0, 255, 0)
+
+-- Track player connections & highlights
+local playerData = {}
+
+-- Create or fix the highlight object
+local function ensureHighlight(player)
+	local character = player.Character
+	if not character then return end
+
+	local highlight = character:FindFirstChild("PersistentHighlight")
+	if not highlight then
+		highlight = Instance.new("Highlight")
+		highlight.Name = "PersistentHighlight"
+		highlight.FillTransparency = 1
+		highlight.OutlineTransparency = 0
+		highlight.OutlineColor = DEFAULT_COLOR
+		highlight.Adornee = character
+		highlight.Parent = character
+	end
+
+	-- Reapply properties in case another script altered it
+	highlight.FillTransparency = 1
+	highlight.OutlineTransparency = 0
+	highlight.Adornee = character
+end
+
+local function updateHighlightColors()
+	local lowestHealth = math.huge
+	local lowestPlayer = nil
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		local char = player.Character
+		local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+		if humanoid and humanoid.Health > 0 then
+			if humanoid.Health < lowestHealth then
+				lowestHealth = humanoid.Health
+				lowestPlayer = player
+			end
+		end
+	end
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		local char = player.Character
+		local highlight = char and char:FindFirstChild("PersistentHighlight")
+		if highlight then
+			highlight.OutlineColor = (player == lowestPlayer) and LOWEST_HEALTH_COLOR or DEFAULT_COLOR
+		end
+	end
+end
+
+-- Handle character spawn
+local function onCharacterAdded(player, character)
+	ensureHighlight(player)
+
+	local humanoid = character:WaitForChild("Humanoid", 5)
+	if humanoid then
+		local conn = humanoid.HealthChanged:Connect(function()
+			updateHighlightColors()
+		end)
+
+		-- Store for cleanup
+		if playerData[player] then
+			playerData[player].humanoidConn = conn
+		end
+	end
+
+	updateHighlightColors()
+end
+
+-- Hook player added
+local function onPlayerAdded(player)
+	playerData[player] = {}
+
+	player.CharacterAdded:Connect(function(char)
+		onCharacterAdded(player, char)
+	end)
+
+	if player.Character then
+		onCharacterAdded(player, player.Character)
+	end
+end
+
+-- Cleanup
+local function onPlayerRemoving(player)
+	if playerData[player] then
+		if playerData[player].humanoidConn then
+			playerData[player].humanoidConn:Disconnect()
+		end
+		playerData[player] = nil
+	end
+end
+
+-- Monitor highlight every frame to override tampering
+RunService.Stepped:Connect(function()
+	for _, player in ipairs(Players:GetPlayers()) do
+		ensureHighlight(player)
+	end
+end)
+
+Players.PlayerAdded:Connect(onPlayerAdded)
+Players.PlayerRemoving:Connect(onPlayerRemoving)
+
+-- Init existing players
+for _, player in ipairs(Players:GetPlayers()) do
+	onPlayerAdded(player)
+end
